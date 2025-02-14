@@ -11,7 +11,7 @@ Written in Zig, intended to be imported to Python.
 
 I will do some preliminary testing with a simple baseline maximal clique algorithm.
 
-- [ ] Maximal clique containing input vertex.
+- [ ] Greedy (by vertex degree) maximal clique algorithm.
 - [ ] Maximum clique
 - [ ] All maximal cliques
 
