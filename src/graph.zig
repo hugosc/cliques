@@ -4,6 +4,7 @@ const AdjacencyList = std.DoublyLinkedList(usize);
 const LNode = AdjacencyList.Node;
 const test_allocator = std.testing.allocator;
 const expect = std.testing.expect;
+const expectError = std.testing.expectError;
 
 fn adjListFind(v: usize, adj: *const AdjacencyList) ?*LNode {
     var head = adj.first;
@@ -67,14 +68,28 @@ pub const Graph = struct {
     fn unsafeAddEdge(self: *Self, v1: usize, v2: usize) !void {
         const adj = self.adjacencies.?;
         const alloc_e1 = try self.allocator.create(LNode);
-        const alloc_e2 = try self.allocator.create(LNode);
         errdefer self.allocator.destroy(alloc_e1);
-        errdefer self.allocator.destroy(alloc_e2);
+        const alloc_e2 = try self.allocator.create(LNode);
 
         alloc_e1.data = v2;
         alloc_e2.data = v1;
         adj[v1].prepend(alloc_e1);
         adj[v2].prepend(alloc_e2);
+    }
+
+    pub fn multiLinePrint(self: *Self, writer: anytype) !void {
+        if (self.adjacencies) |adjs| {
+            for (adjs, 0..) |adj, i| {
+                var curr = adj.first;
+                try writer.print("{} ->", .{i});
+                while (curr) |item| : (curr = item.next) {
+                    try writer.print(" {}", .{item.data});
+                }
+                try writer.print("\n", .{});
+            }
+        } else {
+            try writer.print("empty graph.\n", .{});
+        }
     }
 
     pub fn deinit(self: *Self) void {
@@ -106,5 +121,6 @@ test "graph alloc" {
     try graph.addVertices(20);
     try expect(graph.size() == 50);
     try graph.safeAddEdge(3, 49);
+    try expectError(GraphError.EdgeAlreadyExists, graph.safeAddEdge(3, 49));
     graph.deinit();
 }
