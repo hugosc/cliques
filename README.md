@@ -5,7 +5,7 @@ Written in Zig, intended to be imported to Python.
 ## Data Structures
 
 - [ ] Bitmask
-- [ ] Adjacency list
+- [x] Adjacency list
 
 ## Algorithms
 
