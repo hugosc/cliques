@@ -1,4 +1,4 @@
-const Graph = @import("graph.zig").Graph;
+const Graph = @import("graph_adj_list.zig").Graph;
 const std = @import("std");
 
 pub fn main() !void {

@@ -1,227 +1,120 @@
 const std = @import("std");
-const Allocator = std.mem.Allocator;
-const AdjacencyList = std.DoublyLinkedList(usize);
-const LNode = AdjacencyList.Node;
-const test_allocator = std.testing.allocator;
 const expect = std.testing.expect;
-const expectError = std.testing.expectError;
+const assert = std.debug.assert;
+const Allocator = std.mem.Allocator;
+const test_allocator = std.testing.allocator;
+const BitSet = std.DynamicBitSet;
+const ArrayList = std.ArrayList;
 
-fn adjListFind(v: usize, adj: *const AdjacencyList) ?*LNode {
-    var head = adj.first;
-    while (head) |item| : (head = item.next) {
-        if (item.data == v) return item;
-    }
-    return null;
+pub fn smallerDegreeThan(g: Graph, a: usize, b: usize) bool {
+    return g.adjacencies[a].count() < g.adjacencies[b].count();
 }
 
-const GraphError = error{ VertexNotExists, EdgeAlreadyExists };
-// What will I do with these graphs? Do I need them to grow in vertices?
-// Their size will be know by reading a specific file
 pub const Graph = struct {
     allocator: Allocator,
-    adjacencies: []AdjacencyList,
+    adjacencies: []BitSet,
 
     const Self = @This();
 
-    pub fn init(allocator: Allocator) Self {
+    pub fn initFull(allocator: Allocator, n_vertices: usize) !Self {
+        const adjacencies = try allocator.alloc(BitSet, n_vertices);
+        for (adjacencies) |*adj| {
+            adj.* = try BitSet.initFull(allocator, n_vertices);
+            adj.unmanaged.unsetAll();
+        }
         return Self{
             .allocator = allocator,
-            .adjacencies = &[_]AdjacencyList{},
+            .adjacencies = adjacencies,
         };
     }
 
-    pub inline fn size(self: *const Self) usize {
+    pub inline fn size(self: Self) usize {
         return self.adjacencies.len;
     }
 
-    pub fn addVertices(self: *Self, n_vertices: usize) !void {
-        const to_alloc = n_vertices + self.size();
-        var new = try self.allocator.alloc(AdjacencyList, to_alloc);
-        @memcpy(new[0..self.adjacencies.len], self.adjacencies);
-        self.allocator.free(self.adjacencies);
-
-        for ((new.len - n_vertices)..new.len) |i| {
-            new[i] = AdjacencyList{
-                .len = 0,
-                .first = null,
-                .last = null,
-            };
-        }
-        self.adjacencies = new;
-    }
-    pub fn safeAddEdge(self: *Self, v1: usize, v2: usize) !void {
-        if (v1 >= self.size() or v2 >= self.size()) {
-            return GraphError.VertexNotExists;
-        }
-        // the previous check guarantees adjacencies is not null and
-        // has positions v1 and v2
-        const adj = self.adjacencies;
-        if (adjListFind(v2, &adj[v1]) != null) {
-            return GraphError.EdgeAlreadyExists;
-        }
-        try self.unsafeAddEdge(v1, v2);
-    }
-    fn unsafeAddEdge(self: *Self, v1: usize, v2: usize) !void {
-        const alloc_e1 = try self.allocator.create(LNode);
-        errdefer self.allocator.destroy(alloc_e1);
-        const alloc_e2 = try self.allocator.create(LNode);
-
-        alloc_e1.data = v2;
-        alloc_e2.data = v1;
-        self.adjacencies[v1].prepend(alloc_e1);
-        self.adjacencies[v2].prepend(alloc_e2);
-    }
-
-    pub fn multiLinePrint(self: *Self, writer: anytype) !void {
-        if (self.size() == 0) {
-            try writer.print("empty graph.", .{});
-            return;
-        }
-
-        for (self.adjacencies, 0..) |adj, i| {
-            var curr = adj.first;
-            try writer.print("{} ->", .{i});
-            while (curr) |item| : (curr = item.next) {
-                try writer.print(" {}", .{item.data});
-            }
-            try writer.print("\n", .{});
-        }
-    }
-
-    pub fn deinit(self: *Self) void {
+    pub fn hasEdges(self: Self) bool {
         for (self.adjacencies) |adj| {
-            var edge = adj.first;
-            while (edge) |item| {
-                const next = item.next;
-                self.allocator.destroy(item);
-                edge = next;
+            if (adj.count() > 0) {
+                return true;
             }
         }
-        self.allocator.free(self.adjacencies);
+        return false;
     }
-};
 
-test "graph init" {
-    var graph = Graph.init(test_allocator);
-    defer graph.deinit();
-    try expect(graph.size() == 0);
-}
+    pub fn addEdge(self: *Self, u: usize, v: usize) void {
+        self.adjacencies[u].set(v);
+        self.adjacencies[v].set(u);
+    }
 
-test "graph alloc" {
-    var graph = Graph.init(test_allocator);
-    defer graph.deinit();
-    try graph.addVertices(30);
-    try expect(graph.size() == 30);
-    try graph.addVertices(20);
-    try expect(graph.size() == 50);
-    try graph.safeAddEdge(3, 49);
-    try expectError(GraphError.EdgeAlreadyExists, graph.safeAddEdge(3, 49));
-}
-
-const dFSReturnStruct = struct {
-    parent: []?usize,
-    pre: []usize,
-    post: []usize,
-    sentinel: usize,
-    allocator: Allocator,
-
-    const Self = @This();
-
-    pub fn init(allocator: Allocator) Self {
+    pub fn clone(self: *const Self) !Self {
+        const adjacencies = try self.allocator.alloc(BitSet, self.size());
+        for (0..self.size()) |i| {
+            adjacencies[i] = try self.adjacencies[i].clone(self.allocator);
+        }
         return Self{
-            .parent = &[_]?usize{},
-            .pre = &[_]usize{},
-            .post = &[_]usize{},
-            .sentinel = undefined,
-            .allocator = allocator,
+            .allocator = self.allocator,
+            .adjacencies = adjacencies,
         };
     }
 
-    pub fn create(n_vertices: usize, allocator: Allocator) !Self {
-        var self = Self.init(allocator);
-
-        self.parent = try allocator.alloc(?usize, n_vertices);
-        @memset(self.parent, null);
-        self.pre = try allocator.alloc(usize, n_vertices);
-        self.post = try allocator.alloc(usize, n_vertices);
-        self.sentinel = n_vertices;
-
-        return self;
-    }
-
     pub fn deinit(self: *Self) void {
-        self.allocator.free(self.parent);
-        self.allocator.free(self.pre);
-        self.allocator.free(self.post);
+        for (self.adjacencies) |*adj| {
+            adj.deinit();
+        }
+        self.allocator.free(self.adjacencies);
+    }
+    // viable nodes - list that contains nodes adjacent to all elements of current clique
+    // keep track of
+    pub fn greedyMaximalClique(self: Self) !ArrayList(usize) {
+        var clique = try ArrayList(usize).initCapacity(self.allocator, self.size());
+        if (self.size() == 0) {
+            return clique;
+        }
+        var viable_nodes = try self.allocator.alloc(usize, self.size());
+        defer self.allocator.free(viable_nodes);
+
+        for (0..self.size()) |node| {
+            viable_nodes[node] = node;
+        }
+        std.sort.heap(usize, viable_nodes, self, smallerDegreeThan);
+        var sentinel = self.size();
+        while (sentinel > 0) : (sentinel -= 1) {
+            const curr_viable = sentinel - 1;
+            const curr_node = viable_nodes[curr_viable];
+            var connected = true;
+            for (clique.items) |c_node| {
+                connected = connected and self.adjacencies[curr_node].isSet(c_node);
+            }
+            if (connected) {
+                clique.appendAssumeCapacity(curr_node);
+            }
+        }
+        return clique;
     }
 };
 
-/// Based onnuth's pseudocode in volume 4's fascicle 12a, TAOCP.
-/// Returns preorder, postorder and spanning tree. Return object
-/// needs to be deallocated by calling its 'deinit()' method.
-pub fn dFSIterative(graph: *const Graph, allocator: Allocator) !dFSReturnStruct {
-    const dfs_ret = try dFSReturnStruct.create(graph.size(), allocator);
-    const aux_arc = try allocator.alloc(?*LNode, graph.size());
-    defer allocator.free(aux_arc);
-
-    var p: usize = 0;
-    var q: usize = 0;
-
-    var sweep = graph.size() - 1;
-
-    while (sweep > 0) : (sweep -= 1) {
-        if (dfs_ret.parent[sweep]) |_| continue;
-        //sweep is the root of a new strongly connected component.
-        var v = sweep;
-        var o_edge = graph.adjacencies[v].first;
-        dfs_ret.parent[v] = dfs_ret.sentinel;
-        dfs_ret.pre[v] = p;
-        p += 1;
-        while (true) {
-            if (o_edge) |edge| {
-                const u = edge.data;
-                o_edge = edge.next;
-                if (dfs_ret.parent[u] == null) {
-                    // if u is an unexplored vertex, move to u
-                    // while saving the next edge to explore from v
-                    dfs_ret.parent[u] = v;
-                    aux_arc[v] = o_edge;
-                    v = u;
-                    dfs_ret.pre[v] = p;
-                    p += 1;
-                    o_edge = graph.adjacencies[v].first;
-                }
-            } else {
-                // finished exploring neighbors of v
-                // we can move back to v's parent
-                dfs_ret.post[v] = q;
-                q += 1;
-                v = dfs_ret.parent[v] orelse unreachable;
-                if (v != dfs_ret.sentinel) {
-                    o_edge = aux_arc[v];
-                } else break;
-            }
-        }
-    }
-    return dfs_ret;
+test "bitset graph" {
+    var graph = try Graph.initFull(test_allocator, 10);
+    try expect(graph.size() == 10);
+    defer graph.deinit();
+    var graph2 = try graph.clone();
+    defer graph2.deinit();
+    try expect(graph.size() == graph2.size());
 }
 
-test "DFS search" {
-    // 4 <-> 3 <-> 1
-    // 3 <-> 2 <-> 0
-    var graph = Graph.init(test_allocator);
+test "graph maximal clique" {
+    var graph = try Graph.initFull(test_allocator, 5);
     defer graph.deinit();
-    try graph.addVertices(5);
-    try graph.unsafeAddEdge(4, 3);
-    try graph.unsafeAddEdge(3, 1);
-    try graph.unsafeAddEdge(3, 2);
-    try graph.unsafeAddEdge(2, 0);
-
-    var ret = try dFSIterative(&graph, test_allocator);
-    try expect(ret.parent[4] == ret.sentinel);
-    try expect(ret.parent[3] == 4);
-    try expect(ret.parent[2] == 3);
-    try expect(ret.parent[1] == 3);
-    try expect(ret.parent[0] == 2);
-    defer ret.deinit();
+    graph.addEdge(0, 3);
+    const clique = try graph.greedyMaximalClique();
+    defer clique.deinit();
+    try expect(clique.items.len == 2);
+    graph.addEdge(0, 1);
+    const clique2 = try graph.greedyMaximalClique();
+    defer clique2.deinit();
+    try expect(clique2.items.len == 2);
+    graph.addEdge(1, 3);
+    const clique3 = try graph.greedyMaximalClique();
+    defer clique3.deinit();
+    try expect(clique3.items.len == 3);
 }
