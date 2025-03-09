@@ -196,7 +196,7 @@ pub fn dFSIterative(graph: *const Graph, allocator: Allocator) !dFSReturnStruct 
                 // we can move back to v's parent
                 dfs_ret.post[v] = q;
                 q += 1;
-                v = dfs_ret.parent[v] orelse unreachable;
+                v = dfs_ret.parent[v].?;
                 if (v != dfs_ret.sentinel) {
                     o_edge = aux_arc[v];
                 } else break;

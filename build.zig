@@ -19,7 +19,15 @@ pub fn build(b: *std.Build) void {
         .name = "graph",
         // In this case the main source file is merely a path, however, in more
         // complicated build scripts, this could be a generated file.
-        .root_source_file = b.path("src/graph_adj_list.zig"),
+        .root_source_file = b.path("src/graph.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const stats_lib = b.addStaticLibrary(.{
+        .name = "graph",
+        // In this case the main source file is merely a path, however, in more
+        // complicated build scripts, this could be a generated file.
+        .root_source_file = b.path("src/stats.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -28,6 +36,7 @@ pub fn build(b: *std.Build) void {
     // location when the user invokes the "install" step (the default step when
     // running `zig build`).
     b.installArtifact(graph_lib);
+    b.installArtifact(stats_lib);
 
     const exe = b.addExecutable(.{
         .name = "graph",
@@ -67,12 +76,20 @@ pub fn build(b: *std.Build) void {
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
     const graph_lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/graph_adj_list.zig"),
+        .root_source_file = b.path("src/graph.zig"),
         .target = target,
         .optimize = optimize,
     });
 
     const run_graph_lib_unit_tests = b.addRunArtifact(graph_lib_unit_tests);
+
+    const stats_lib_unit_tests = b.addTest(.{
+        .root_source_file = b.path("src/graph.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_stats_lib_unit_tests = b.addRunArtifact(stats_lib_unit_tests);
 
     const exe_unit_tests = b.addTest(.{
         .root_source_file = b.path("src/main.zig"),
@@ -87,5 +104,6 @@ pub fn build(b: *std.Build) void {
     // running the unit tests.
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_graph_lib_unit_tests.step);
+    test_step.dependOn(&run_stats_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
 }

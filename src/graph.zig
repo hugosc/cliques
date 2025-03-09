@@ -3,12 +3,10 @@ const expect = std.testing.expect;
 const assert = std.debug.assert;
 const Allocator = std.mem.Allocator;
 const test_allocator = std.testing.allocator;
-const BitSet = std.DynamicBitSet;
+const BitSet = std.DynamicBitSetUnmanaged;
 const ArrayList = std.ArrayList;
-
-pub fn smallerDegreeThan(g: Graph, a: usize, b: usize) bool {
-    return g.adjacencies[a].count() < g.adjacencies[b].count();
-}
+const cstdlib = @cImport(@cInclude("stdlib.h"));
+const stats = @import("stats.zig");
 
 pub const Graph = struct {
     allocator: Allocator,
@@ -20,7 +18,7 @@ pub const Graph = struct {
         const adjacencies = try allocator.alloc(BitSet, n_vertices);
         for (adjacencies) |*adj| {
             adj.* = try BitSet.initFull(allocator, n_vertices);
-            adj.unmanaged.unsetAll();
+            adj.unsetAll();
         }
         return Self{
             .allocator = allocator,
@@ -30,6 +28,18 @@ pub const Graph = struct {
 
     pub inline fn size(self: Self) usize {
         return self.adjacencies.len;
+    }
+    ///O(n) call, beware
+    pub inline fn degree(self: Self, u: usize) usize {
+        return self.adjacencies[u].count();
+    }
+
+    pub inline fn numEdges(self: Self) usize {
+        var acc: usize = 0;
+        for (self.adjacencies) |adj| {
+            acc += adj.count();
+        }
+        return acc / 2;
     }
 
     pub fn hasEdges(self: Self) bool {
@@ -41,9 +51,20 @@ pub const Graph = struct {
         return false;
     }
 
-    pub fn addEdge(self: *Self, u: usize, v: usize) void {
+    pub fn setEdge(self: *Self, u: usize, v: usize) void {
         self.adjacencies[u].set(v);
         self.adjacencies[v].set(u);
+    }
+
+    pub fn unsetEdge(self: *Self, u: usize, v: usize) void {
+        self.adjacencies[u].unset(v);
+        self.adjacencies[v].unset(u);
+    }
+
+    pub fn unsetAll(self: *Self) void {
+        for (self.adjacencies) |*adj| {
+            adj.unsetAll();
+        }
     }
 
     pub fn clone(self: *const Self) !Self {
@@ -59,39 +80,79 @@ pub const Graph = struct {
 
     pub fn deinit(self: *Self) void {
         for (self.adjacencies) |*adj| {
-            adj.deinit();
+            adj.deinit(self.allocator);
         }
         self.allocator.free(self.adjacencies);
     }
-    // viable nodes - list that contains nodes adjacent to all elements of current clique
-    // keep track of
-    pub fn greedyMaximalClique(self: Self) !ArrayList(usize) {
-        var clique = try ArrayList(usize).initCapacity(self.allocator, self.size());
-        if (self.size() == 0) {
-            return clique;
-        }
-        var viable_nodes = try self.allocator.alloc(usize, self.size());
-        defer self.allocator.free(viable_nodes);
 
-        for (0..self.size()) |node| {
-            viable_nodes[node] = node;
-        }
-        std.sort.heap(usize, viable_nodes, self, smallerDegreeThan);
-        var sentinel = self.size();
-        while (sentinel > 0) : (sentinel -= 1) {
-            const curr_viable = sentinel - 1;
-            const curr_node = viable_nodes[curr_viable];
-            var connected = true;
-            for (clique.items) |c_node| {
-                connected = connected and self.adjacencies[curr_node].isSet(c_node);
+    pub fn format(
+        self: Self,
+        comptime _: []const u8,
+        _: std.fmt.FormatOptions,
+        out_stream: anytype,
+    ) !void {
+        try std.fmt.format(out_stream, "graph{{ n = {d}, m = {d} }}", .{ self.size(), self.numEdges() });
+    }
+    pub fn printNeighbours(self: Self, writer: anytype) !void {
+        try writer.print("{}\n", .{self});
+        for (0..self.size()) |u| {
+            try writer.print("\tnode {d}, d({d}) = {d}, N({d}) = {{", .{ u, u, self.degree(u), u });
+            var it = self.adjacencies[u].iterator(.{});
+            if (it.next()) |v| {
+                try writer.print("{d}", .{v});
             }
-            if (connected) {
-                clique.appendAssumeCapacity(curr_node);
+            while (it.next()) |v| {
+                try writer.print(", {d}", .{v});
             }
+            try writer.print("}}\n", .{});
         }
-        return clique;
     }
 };
+
+pub fn erdosRenyiGraph(g: *Graph, density: f32) void {
+    for (0..g.size() - 1) |u| {
+        if (density < 0.5) {
+            g.adjacencies[u].unsetAll();
+            for (u..g.size()) |v| {
+                const int_thresh: @TypeOf(cstdlib.RAND_MAX) = @intFromFloat(density * cstdlib.RAND_MAX);
+                if (cstdlib.rand() < int_thresh) {
+                    g.adjacencies[u].set(v);
+                    g.adjacencies[v].set(u);
+                }
+            }
+        } else {
+            g.adjacencies[u].setAll();
+            for (u..g.size()) |v| {
+                const int_thresh: @TypeOf(cstdlib.RAND_MAX) = @intFromFloat(density * cstdlib.RAND_MAX);
+                if (cstdlib.rand() > int_thresh) {
+                    g.adjacencies[u].unset(v);
+                    g.adjacencies[v].unset(u);
+                }
+            }
+        }
+    }
+}
+
+pub fn erdosRenyiGraphFast(g: *Graph, density: f32, rng: anytype) void {
+    for (1..g.size()) |u| {
+        stats.randomBits(density, g.adjacencies[u].masks, u, rng);
+    }
+    for (0..g.size() - 1) |u| {
+        for (u..g.size()) |v| {
+            g.adjacencies[u].setValue(v, g.adjacencies[v].isSet(u));
+        }
+    }
+}
+// pub fn erdosRenyiGraph(g: *Graph, density: f32, prng: std.rand.Random) void {
+//     for (0..g.size() - 1) |u| {
+//         for (u..g.size()) |v| {
+//             const int_thresh: u16 = @intFromFloat(density * std.math.maxInt(u16));
+//             const edgeVal = prng.int(u16) < int_thresh;
+//             g.adjacencies[u].setValue(v, edgeVal);
+//             g.adjacencies[v].setValue(u, edgeVal);
+//         }
+//     }
+// }
 
 test "bitset graph" {
     var graph = try Graph.initFull(test_allocator, 10);
@@ -105,15 +166,15 @@ test "bitset graph" {
 test "graph maximal clique" {
     var graph = try Graph.initFull(test_allocator, 5);
     defer graph.deinit();
-    graph.addEdge(0, 3);
+    graph.setEdge(0, 3);
     const clique = try graph.greedyMaximalClique();
     defer clique.deinit();
     try expect(clique.items.len == 2);
-    graph.addEdge(0, 1);
+    graph.setEdge(0, 1);
     const clique2 = try graph.greedyMaximalClique();
     defer clique2.deinit();
     try expect(clique2.items.len == 2);
-    graph.addEdge(1, 3);
+    graph.setEdge(1, 3);
     const clique3 = try graph.greedyMaximalClique();
     defer clique3.deinit();
     try expect(clique3.items.len == 3);
