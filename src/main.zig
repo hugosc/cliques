@@ -5,20 +5,20 @@ const std = @import("std");
 
 pub fn simulate(n_vertices: u32, density: f16, allocator: std.mem.Allocator, times: []i64, writer: anytype) !void {
     var graph = try gr.Graph.initFull(allocator, n_vertices);
-    var clique_aux = try algo.GreedyMaximalCliqueAux.initFull(graph);
+    var clique_runner = try algo.GreedyMaximalCliqueRunner.initFromGraph(graph);
 
     defer graph.deinit();
-    defer clique_aux.deinit();
+    defer clique_runner.deinit();
 
     var rng = std.Random.DefaultPrng.init(42);
 
     for (times) |*time| {
         gr.erdosRenyiGraphFast(&graph, density, &rng);
         const start = std.time.milliTimestamp();
-        clique_aux.greedyMaximalClique();
+        clique_runner.run();
         const end = std.time.milliTimestamp();
         time.* = end - start;
-        try writer.print("{}, clique {any}\n", .{ graph, clique_aux.clique.items.len });
+        try writer.print("{}, clique {any}\n", .{ graph, clique_runner.clique.items.len });
     }
 }
 
@@ -31,7 +31,7 @@ pub fn main() !void {
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
 
-    const n_vertices = 50000;
+    const n_vertices = 500;
     const density = 0.5;
     const n_simulations = 50;
 

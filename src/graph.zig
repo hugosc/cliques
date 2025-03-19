@@ -14,6 +14,10 @@ pub const Graph = struct {
 
     const Self = @This();
 
+    pub fn init(allocator: Allocator) Self {
+        return Self{ .allocator = allocator, .adjacencies = &[_]BitSet{} };
+    }
+
     pub fn initFull(allocator: Allocator, n_vertices: usize) !Self {
         const adjacencies = try allocator.alloc(BitSet, n_vertices);
         for (adjacencies) |*adj| {
@@ -161,21 +165,4 @@ test "bitset graph" {
     var graph2 = try graph.clone();
     defer graph2.deinit();
     try expect(graph.size() == graph2.size());
-}
-
-test "graph maximal clique" {
-    var graph = try Graph.initFull(test_allocator, 5);
-    defer graph.deinit();
-    graph.setEdge(0, 3);
-    const clique = try graph.greedyMaximalClique();
-    defer clique.deinit();
-    try expect(clique.items.len == 2);
-    graph.setEdge(0, 1);
-    const clique2 = try graph.greedyMaximalClique();
-    defer clique2.deinit();
-    try expect(clique2.items.len == 2);
-    graph.setEdge(1, 3);
-    const clique3 = try graph.greedyMaximalClique();
-    defer clique3.deinit();
-    try expect(clique3.items.len == 3);
 }
